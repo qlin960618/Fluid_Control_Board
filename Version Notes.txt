@@ -1,5 +1,5 @@
 v4.0: (board_main_v2.2-2.13)
-	Major restructuring of the code from version 3. Optimization of the 	User interface and communication
+	Major restructuring of the code from version 3. Optimization of the User interface and communication
 v4.1: (board_main_v2.13-3.0)
 	--Critical update
 	Adding ability to save channel parameter. 
