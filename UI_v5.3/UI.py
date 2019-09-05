@@ -25,6 +25,7 @@ VERSION='5.3'#version number
 SLIDER_LENGTH=350	#hight of the slider 
 MIN_INTERVAL=50 	#Serial update limmit in ms
 VACUM_OFFSET=80		#amount of negative offset to vacum
+BINARY_SETPOINT=1023	#value to trigger binary control
 
 
 ################################non-critical Parameter########################################
@@ -114,8 +115,9 @@ class App:
 	def __init__(self, masterWindow, serialApp):	
 		###############################Initializer##############################
 		#Intialize Global variabel 
-		self.chVal=[0 for x in range(N_CHANNEL)]
-		self.valMax=[VAL_MAX for i in range(N_CHANNEL)]
+		self.chVal=		[0 			for i in range(N_CHANNEL)]
+		self.valMax=	[VAL_MAX 	for i in range(N_CHANNEL)]
+		self.binStatus=	[False 		for i in range(N_CHANNEL)]
 
 		#misc variable
 		self.currentState=False   #current state of the program
@@ -164,12 +166,16 @@ class App:
 		self.mismatchLabel1.grid(row=2, column=1)
 		self.errorLabel1=tk.Label(self.infoFrame,text="        ", bg="red", borderwidth=3, relief="groove")
 		self.errorLabel1.grid(row=3, column=1)
+		self.binaryLabel1=tk.Label(self.infoFrame,text="        ", bg="yellow", borderwidth=3, relief="groove")
+		self.binaryLabel1.grid(row=4, column=1)
 		self.matchLabel2=tk.Label(self.infoFrame,text="Set")
 		self.matchLabel2.grid(row=1, column=0)
 		self.mismatchLabel2=tk.Label(self.infoFrame,text="Mismatch")
 		self.mismatchLabel2.grid(row=2, column=0)
 		self.errorLabel2=tk.Label(self.infoFrame,text="Error")
 		self.errorLabel2.grid(row=3, column=0)
+		self.binaryLabel2=tk.Label(self.infoFrame,text="Binary On")
+		self.binaryLabel2.grid(row=4, column=0)
 
 
 		#Serial Frame
@@ -227,6 +233,7 @@ class App:
 		self.sliderMaxEntry =[0 for i in range(N_CHANNEL)]
 		self.maxEntryVar 	=[0 for i in range(N_CHANNEL)]
 		self.statusLabel	=[0 for i in range(N_CHANNEL)]
+		self.binaryOnBtn 	=[0 for i in range(N_CHANNEL)]
 
 		#Channel Frame Label
 		self.nameLabel=tk.Label(self.channelsFrame, text="Name")
@@ -241,6 +248,8 @@ class App:
 		self.rangeLabel.grid(column=0, row=6)
 		self.stLLabel=tk.Label(self.channelsFrame, text="Status")
 		self.stLLabel.grid(column=0, row=7)
+		self.binLabel=tk.Label(self.channelsFrame, text="Full On")
+		self.binLabel.grid(column=0, row=8)
 
 
 		#initialize channel array
@@ -299,7 +308,11 @@ class App:
 
 			#status Label
 			self.statusLabel[i]=tk.Label(self.channelsFrame, text="             ",bg="green")
-			self.statusLabel[i].grid(column=i*2+1, row=7, columnspan=2)			
+			self.statusLabel[i].grid(column=i*2+1, row=7, columnspan=2)	
+
+			#Binary Button
+			self.binaryOnBtn[i]=tk.Button(self.channelsFrame, text="On", command=partial(self.setBinOn, i))		
+			self.binaryOnBtn[i].grid(column=i*2+1, row=8, columnspan=2)	
 
 
 		#first time Function 
@@ -319,7 +332,7 @@ class App:
 		self.request_Channel_Status()
 		#set channel
 		for i in range(N_CHANNEL):
-			if self.chVal[i] != self.slider[i].get():
+			if self.chVal[i] != self.slider[i].get() and not self.binStatus[i]:
 				time.sleep(MIN_INTERVAL/2000.0)
 				self.set_Channel(i)
 
@@ -331,15 +344,19 @@ class App:
 		if self.currentState:
 			self.masterWindow.after(MIN_INTERVAL, self.timer_Call)
 
-	def set_Channel(self, x):
+	def set_Channel(self, ind, force=False):
 		if self.SerialApp.getStatus():
-			valIn=self.slider[x].get();
-			if self.chVal[x]!=valIn:
-				self.statusLabel[x].config(bg="red") 
-				val=valIn+VACUM_OFFSET
+			valIn=self.slider[ind].get()
+			if self.chVal[ind]!=valIn or force==True:
+				self.statusLabel[ind].config(bg="red") 
+				if(not self.binStatus[ind]):
+					val=valIn+VACUM_OFFSET
+				else:
+					val=BINARY_SETPOINT
+
 				################### Serial processing ############################
 				#parity calculation
-				par=x<<10|val
+				par=ind<<10|val
 				par ^= par >> 8
 				par ^= par >> 4
 				par ^= par >> 2
@@ -348,7 +365,7 @@ class App:
 
 				c=[0,0]
 				#two byte of data: channel 5bits, value 10bits, parity 1bit (set on even)
-				c[0]= struct.pack("B",(((x&0x1F)<<3)|((val>>7)&0x7))&0xff)
+				c[0]= struct.pack("B",(((ind&0x1F)<<3)|((val>>7)&0x7))&0xff)
 				c[1]= struct.pack("B",(val<<1|(parity&0x1))&0xff)
 
 				#initiate communication
@@ -362,9 +379,13 @@ class App:
 
 				if b==b'k':
 					if VERBOSE>1:
-						print("Channel %d is set to %d"%(x+1, valIn))
-					self.chVal[x]=valIn
-					self.statusLabel[x].config(bg="tan1")  #Update channel status
+						if(self.binStatus[ind]):
+							print("Channel %d is set to FULL ON"%(ind+1))
+						else:
+							print("Channel %d is set to %d"%(ind+1, valIn))
+					if(not self.binStatus[ind]):
+						self.chVal[ind]=valIn
+						self.statusLabel[ind].config(bg="tan1")  #Update channel status
 				else:	#return string mismatch
 					if VERBOSE>0:
 						print("Return string mismatch")
@@ -396,7 +417,9 @@ class App:
 					print("allSet")
 			c=c>>16-N_CHANNEL
 			for i in reversed(range(N_CHANNEL)):
-				if (c&0x1)==0:
+				if (self.binStatus[i]):
+					self.statusLabel[i].config(bg="yellow")
+				elif (c&0x1)==0:
 					self.statusLabel[i].config(bg="green")
 				else:
 					self.statusLabel[i].config(bg="tan1")
@@ -433,7 +456,7 @@ class App:
 
 		#Unit/Value conversion
 		if SENSOR_MIXING:
-			self.chValkPaLabel[ind].config(text="%.2f"%(self.slider[ind].get()*SENSOR_RANGE[x]*0.007013712565))
+			self.chValkPaLabel[ind].config(text="%.2f"%(self.slider[ind].get()*SENSOR_RANGE[ind]*0.007013712565))
 		else:
 			self.chValkPaLabel[ind].config(text="%.2f"%(self.slider[ind].get()*SENSOR_RANGE*0.007013712565))
 
@@ -479,6 +502,39 @@ class App:
 			self.valMax[ind]=self.slider[ind].get()
 			self.slider[ind].config(from_=self.slider[ind].get())
 			self.maxEntryVar[ind].set(self.slider[ind].get())	
+
+
+	def setBinOn(self, ind):
+		
+		if (not self.binStatus[ind]):
+			print("set channel %d to binary ON"%(ind+1))
+			self.binaryOnBtn[ind].config(text="Off")
+			self.binStatus[ind]=True
+			self.set_Channel(ind, True)
+
+			#disable give channel control
+			self.slider[ind].config(state='disabled')
+			self.setMinBtn[ind].config(state='disabled')
+			if (MAX_BTN_PRESENT):
+				self.setMaxBtn[ind].config(state='disabled')
+			self.chValEntry[ind].config(state='disabled')
+			self.downBtn[ind].config(state='disabled')
+			self.upBtn[ind].config(state='disabled')
+		else:
+			print("set channel %d to binary OFF"%(ind+1))
+			self.binaryOnBtn[ind].config(text="On")
+			self.binStatus[ind]=False
+			#reenable channel control
+			self.slider[ind].config(state='normal')
+			self.setMinBtn[ind].config(state='normal')
+			if (MAX_BTN_PRESENT):
+				self.setMaxBtn[ind].config(state='normal')
+			self.chValEntry[ind].config(state='normal')
+			self.downBtn[ind].config(state='normal')
+			self.upBtn[ind].config(state='normal')
+			#zero channel
+			self.set_Mn(ind, 0)
+			self.set_Channel(ind, True)
 
 	def zero_All(self):
 		if VERBOSE>1:
@@ -660,6 +716,7 @@ class App:
 				self.chValEntry[i].config(state='disabled')
 				self.downBtn[i].config(state='disabled')
 				self.upBtn[i].config(state='disabled')
+				self.binaryOnBtn[i].config(state='disabled')
 		else:
 			self.currentState=True
 			print("Re-enabling all input")
@@ -676,6 +733,7 @@ class App:
 				self.chValEntry[i].config(state='normal')
 				self.downBtn[i].config(state='normal')
 				self.upBtn[i].config(state='normal')
+				self.binaryOnBtn[i].config(state='normal')
 
 			#initialize routine function
 			self.masterWindow.after(MIN_INTERVAL, self.timer_Call)
