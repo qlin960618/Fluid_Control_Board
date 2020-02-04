@@ -17,7 +17,7 @@ from os import listdir
 from os.path import isfile, join
 
 VERBOSE=0 #debugger
-VERSION='5.3'#version number
+VERSION='5.4'#version number
 
 ################################critical Parameter########################################
 #dont modify unless you are sure.
@@ -25,7 +25,9 @@ VERSION='5.3'#version number
 SLIDER_LENGTH=350	#hight of the slider 
 MIN_INTERVAL=50 	#Serial update limmit in ms
 VACUM_OFFSET=80		#amount of negative offset to vacum
-BINARY_SETPOINT=1023	#value to trigger binary control
+#value for binary control setpoint
+BINARY_SETPOINT_ON=1023
+BINARY_SETPOINT_OFF=1022	
 
 
 ################################non-critical Parameter########################################
@@ -59,6 +61,8 @@ BTN_OFFSET=2
 
 #default serial port, Change if different arduino is used
 DEFULT_SER_PID=66
+
+
 
 
 def main():
@@ -115,9 +119,10 @@ class App:
 	def __init__(self, masterWindow, serialApp):	
 		###############################Initializer##############################
 		#Intialize Global variabel 
-		self.chVal=		[0 			for i in range(N_CHANNEL)]
-		self.valMax=	[VAL_MAX 	for i in range(N_CHANNEL)]
-		self.binStatus=	[False 		for i in range(N_CHANNEL)]
+		self.chVal=		[VACUM_OFFSET 	for i in range(N_CHANNEL)]
+		self.valMax=	[VAL_MAX 		for i in range(N_CHANNEL)]
+		self.binStatus=	[False 			for i in range(N_CHANNEL)]
+		self.binState= 	[False			for i in range(N_CHANNEL)]
 
 		#misc variable
 		self.currentState=False   #current state of the program
@@ -126,6 +131,7 @@ class App:
 
 		#Window
 		self.masterWindow=masterWindow
+
 		#assign title
 		self.masterWindow.title("Fluid Control Board UI")
 
@@ -146,10 +152,10 @@ class App:
 		self.zeroAllBtn.grid(row=1, column=0)
 		"""
 		self.disableAllBtn=tk.Button(self.smFrame, text="disableAll", 
-									activebackground='blue', command=partial(self.toggle_State, False))
+									activebackground='blue', command=partial(self.toggleUIState, False))
 		self.disableAllBtn.grid(row=2, column=0)
 		self.enableAllBtn=tk.Button(self.smFrame, text="enableAll", state='disabled',
-									activebackground='blue', command=partial(self.toggle_State, True))
+									activebackground='blue', command=partial(self.toggleUIState, True))
 		self.enableAllBtn.grid(row=3, column=0)
 		"""
 
@@ -174,7 +180,7 @@ class App:
 		self.mismatchLabel2.grid(row=2, column=0)
 		self.errorLabel2=tk.Label(self.infoFrame,text="Error")
 		self.errorLabel2.grid(row=3, column=0)
-		self.binaryLabel2=tk.Label(self.infoFrame,text="Binary On")
+		self.binaryLabel2=tk.Label(self.infoFrame,text="Binary Control")
 		self.binaryLabel2.grid(row=4, column=0)
 
 
@@ -229,6 +235,8 @@ class App:
 		self.downBtn		=[0 for i in range(N_CHANNEL)]
 		if (MAX_BTN_PRESENT):
 			self.setMaxBtn		=[0 for i in range(N_CHANNEL)]
+		self.binOnBtn		=[0 for i in range(N_CHANNEL)]
+		self.binOffBtn		=[0 for i in range(N_CHANNEL)]
 		self.setMinBtn		=[0 for i in range(N_CHANNEL)]
 		self.sliderMaxEntry =[0 for i in range(N_CHANNEL)]
 		self.maxEntryVar 	=[0 for i in range(N_CHANNEL)]
@@ -248,7 +256,7 @@ class App:
 		self.rangeLabel.grid(column=0, row=6)
 		self.stLLabel=tk.Label(self.channelsFrame, text="Status")
 		self.stLLabel.grid(column=0, row=7)
-		self.binLabel=tk.Label(self.channelsFrame, text="Full On")
+		self.binLabel=tk.Label(self.channelsFrame, text="Binary")
 		self.binLabel.grid(column=0, row=8)
 
 
@@ -281,7 +289,7 @@ class App:
 			#binding function key
 			self.chValEntry[i].bind("<Return>", partial(self.read_Val, i, 1))
 
-			#min max btn
+			#min max
 			self.setMinBtn[i]=tk.Button(self.channelsFrame, text="Min", command=partial(self.set_Mn, i, 0),
 										activebackground='blue')
 			self.setMinBtn[i].grid(column=i*2+1, row=4)
@@ -311,14 +319,22 @@ class App:
 			self.statusLabel[i].grid(column=i*2+1, row=7, columnspan=2)	
 
 			#Binary Button
-			self.binaryOnBtn[i]=tk.Button(self.channelsFrame, text="On", command=partial(self.setBinOn, i))		
+			self.binaryOnBtn[i]=tk.Button(self.channelsFrame, text="On", command=partial(self.toggleBinState, i))		
 			self.binaryOnBtn[i].grid(column=i*2+1, row=8, columnspan=2)	
+
+			#binary on off btn
+			self.binOnBtn[i]=tk.Button(self.channelsFrame, text="On", 
+										command=partial(self.binToggle, i, 1), state="disabled")
+			self.binOnBtn[i].grid(column=(i+1)*2, row=9)
+			self.binOffBtn[i]=tk.Button(self.channelsFrame, text="Off", 
+										command=partial(self.binToggle, i, 0), state="disabled")
+			self.binOffBtn[i].grid(column=i*2+1, row=9)
 
 
 		#first time Function 
 		self.refresh_Serial() #refresh Serial List
 
-		self.toggle_State(False)
+		self.toggleUIState(False)
 
 
 		print("Program initialization Complete!\n")
@@ -332,7 +348,7 @@ class App:
 		self.request_Channel_Status()
 		#set channel
 		for i in range(N_CHANNEL):
-			if self.chVal[i] != self.slider[i].get() and not self.binStatus[i]:
+			if self.chVal[i] != self.slider[i].get() and not self.binState[i]:
 				time.sleep(MIN_INTERVAL/2000.0)
 				self.set_Channel(i)
 
@@ -349,10 +365,12 @@ class App:
 			valIn=self.slider[ind].get()
 			if self.chVal[ind]!=valIn or force==True:
 				self.statusLabel[ind].config(bg="red") 
-				if(not self.binStatus[ind]):
-					val=valIn+VACUM_OFFSET
-				else:
-					val=BINARY_SETPOINT
+				val=valIn+VACUM_OFFSET
+				if(self.binState[ind]):
+					if(self.binStatus[ind]):
+						val=BINARY_SETPOINT_ON
+					else:
+						val=BINARY_SETPOINT_OFF
 
 				################### Serial processing ############################
 				#parity calculation
@@ -378,17 +396,20 @@ class App:
 				b=self.SerialApp.readByte()
 
 				if b==b'k':
-					if VERBOSE>1:
+					if VERBOSE>1 and self.binState[ind]:
 						if(self.binStatus[ind]):
-							print("Channel %d is set to FULL ON"%(ind+1))
+							print("Channel %d is set to ON"%(ind+1))
 						else:
-							print("Channel %d is set to %d"%(ind+1, valIn))
-					if(not self.binStatus[ind]):
+							print("Channel %d is set to OFF"%(ind+1))
+					elif VERBOSE>1 :
+							print("Channel %d is set to %d"%(ind+1, self.chVal[ind]))
+					if(not self.binState[ind]):
 						self.chVal[ind]=valIn
 						self.statusLabel[ind].config(bg="tan1")  #Update channel status
 				else:	#return string mismatch
 					if VERBOSE>0:
 						print("Return string mismatch")
+
 		else:
 			self.reset_Serial()
 			print("Serial Not Connected!")
@@ -417,7 +438,7 @@ class App:
 					print("allSet")
 			c=c>>16-N_CHANNEL
 			for i in reversed(range(N_CHANNEL)):
-				if (self.binStatus[i]):
+				if (self.binState[i]):
 					self.statusLabel[i].config(bg="yellow")
 				elif (c&0x1)==0:
 					self.statusLabel[i].config(bg="green")
@@ -503,13 +524,60 @@ class App:
 			self.slider[ind].config(from_=self.slider[ind].get())
 			self.maxEntryVar[ind].set(self.slider[ind].get())	
 
+	def toggleUIState(self, state):
+		if (state==False):
+			self.currentState=False
+			print("Disabling all input")
+			#self.disableAllBtn.config(state='disabled')
+			#self.enableAllBtn.config(state='normal')
+			self.loadBtn.config(state='normal')
+			self.zeroAllBtn.config(state='disabled')
+			for i in range(N_CHANNEL):
+				self.slider[i].config(state='disabled')
+				self.setMinBtn[i].config(state='disabled')
+				if (MAX_BTN_PRESENT):
+					self.setMaxBtn[i].config(state='disabled')
+				self.chValEntry[i].config(state='disabled')
+				self.downBtn[i].config(state='disabled')
+				self.upBtn[i].config(state='disabled')
+				self.binaryOnBtn[i].config(state='disabled')
+				self.binOnBtn[i].config(state='disabled')
+				self.binOffBtn[i].config(state='disabled')
+		else:
+			self.currentState=True
+			print("Re-enabling all input")
+			#self.disableAllBtn.config(state='normal')
+			#self.enableAllBtn.config(state='disabled')
+			self.loadBtn.config(state='disabled')
+			self.zeroAllBtn.config(state='normal')
+			for i in range(N_CHANNEL):
+				self.slider[i].set(0)
+				self.slider[i].config(state='normal')
+				self.setMinBtn[i].config(state='normal')
+				if (MAX_BTN_PRESENT):
+					self.setMaxBtn[i].config(state='normal')
+				self.chValEntry[i].config(state='normal')
+				self.downBtn[i].config(state='normal')
+				self.upBtn[i].config(state='normal')
+				self.binaryOnBtn[i].config(state='normal')
+				self.binState[i]=False
+				self.binaryOnBtn[i].config(text="On")
+				self.binOnBtn[i].config(state='disabled')
+				self.binOffBtn[i].config(state='disabled')
 
-	def setBinOn(self, ind):
-		
-		if (not self.binStatus[ind]):
-			print("set channel %d to binary ON"%(ind+1))
+
+			#initialize routine function
+			self.masterWindow.after(MIN_INTERVAL, self.timer_Call)
+
+	#toggle binary control
+	def toggleBinState(self, ind):
+		if (not self.binState[ind]):
+			print("set channel %d to Binary Control"%(ind+1))
+			self.binState[ind]=True
+			self.binStatus[ind]=False
 			self.binaryOnBtn[ind].config(text="Off")
-			self.binStatus[ind]=True
+			self.binOnBtn[ind].config(state='normal')
+			self.binOffBtn[ind].config(state='normal')
 			self.set_Channel(ind, True)
 
 			#disable give channel control
@@ -521,9 +589,11 @@ class App:
 			self.downBtn[ind].config(state='disabled')
 			self.upBtn[ind].config(state='disabled')
 		else:
-			print("set channel %d to binary OFF"%(ind+1))
+			print("set channel %d to Propotional Control"%(ind+1))
+			self.binState[ind]=False
 			self.binaryOnBtn[ind].config(text="On")
-			self.binStatus[ind]=False
+			self.binOnBtn[ind].config(state='disabled')
+			self.binOffBtn[ind].config(state='disabled')
 			#reenable channel control
 			self.slider[ind].config(state='normal')
 			self.setMinBtn[ind].config(state='normal')
@@ -535,6 +605,15 @@ class App:
 			#zero channel
 			self.set_Mn(ind, 0)
 			self.set_Channel(ind, True)
+
+	#Toggle Binary State
+	def binToggle(self, ind, state):
+		if (state):
+			self.binStatus[ind]=True
+		else:
+			self.binStatus[ind]=False
+		self.set_Channel(ind, True)
+
 
 	def zero_All(self):
 		if VERBOSE>1:
@@ -577,11 +656,11 @@ class App:
 				self.serialDisconnectBtn.config(state='normal')
 				self.serialConnectBtn.config(state='disabled')
 				self.serialStatusLabel.config(bg='green')
-				self.toggle_State(True)
+				self.toggleUIState(True)
 				self.zero_All()
 			else:
 				self.serialStatusLabel.config(bg='red')
-				self.toggle_State(False)
+				self.toggleUIState(False)
 
 	def reset_Serial(self):
 		if self.SerialApp.getStatus()==True:
@@ -589,7 +668,7 @@ class App:
 			self.serialConnectBtn.config(state='normal')
 			self.serialStatusLabel.config(bg='red')
 			self.SerialApp.reset()
-			self.toggle_State(False)
+			self.toggleUIState(False)
 
 
 	def save_Parameter(self):
@@ -698,45 +777,6 @@ class App:
 		for i in range(len(pFiles)):
 			pFilesBtn[i]=tk.Button(self.fListPopup, text=pFiles[i], command=partial(self.s_selection_callback, pFiles[i]))
 			pFilesBtn[i].grid(row=i+1, column=1)
-
-
-	def toggle_State(self, inVal):
-		if (inVal==False):
-			self.currentState=False
-			print("Disabling all input")
-			#self.disableAllBtn.config(state='disabled')
-			#self.enableAllBtn.config(state='normal')
-			self.loadBtn.config(state='normal')
-			self.zeroAllBtn.config(state='disabled')
-			for i in range(N_CHANNEL):
-				self.slider[i].config(state='disabled')
-				self.setMinBtn[i].config(state='disabled')
-				if (MAX_BTN_PRESENT):
-					self.setMaxBtn[i].config(state='disabled')
-				self.chValEntry[i].config(state='disabled')
-				self.downBtn[i].config(state='disabled')
-				self.upBtn[i].config(state='disabled')
-				self.binaryOnBtn[i].config(state='disabled')
-		else:
-			self.currentState=True
-			print("Re-enabling all input")
-			#self.disableAllBtn.config(state='normal')
-			#self.enableAllBtn.config(state='disabled')
-			self.loadBtn.config(state='disabled')
-			self.zeroAllBtn.config(state='normal')
-			for i in range(N_CHANNEL):
-				self.slider[i].set(0)
-				self.slider[i].config(state='normal')
-				self.setMinBtn[i].config(state='normal')
-				if (MAX_BTN_PRESENT):
-					self.setMaxBtn[i].config(state='normal')
-				self.chValEntry[i].config(state='normal')
-				self.downBtn[i].config(state='normal')
-				self.upBtn[i].config(state='normal')
-				self.binaryOnBtn[i].config(state='normal')
-
-			#initialize routine function
-			self.masterWindow.after(MIN_INTERVAL, self.timer_Call)
 
 	def close_Window(self):
 		print("\nExiting Program\n")
