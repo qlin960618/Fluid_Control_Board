@@ -11,7 +11,7 @@ import struct
 ######################program parameter ######################
 
 VERBOSE=1 #debugger
-VERSION='5.0'#version number
+VERSION='5.4'#version number
 
 
 MIN_INTERVAL=50   #minimum communication interval
@@ -215,9 +215,9 @@ class FCB:
 		if self.channelVal[index]==valIn:
 			if VERBOSE>1:
 				print("set value is same")
-			return True
+			return False
 		#value min max bound check
-		if valIn> VAL_MAX and valIn!=BINARY_SETPOINT_ON and valIn!=BINARY_SETPOINT_OFF:
+		if valIn> VAL_MAX:
 			if VERBOSE>0:
 				print("Value out of bound")
 			raise ValueError("set value out of bound")
@@ -230,12 +230,7 @@ class FCB:
 		#grab channel ID
 		x=self.channelID[index]
 		#pre-processing for parity
-		if(valIn==BINARY_SETPOINT_ON):
-			val=BINARY_SETPOINT_ON
-		elif(valIn==BINARY_SETPOINT_OFF):
-			val=BINARY_SETPOINT_OFF
-		else:
-			val=valIn+VACUM_OFFSET
+		val=valIn+VACUM_OFFSET
 			
 		par=x<<10|val
 		par ^= par >> 8
@@ -271,6 +266,74 @@ class FCB:
 				print("Set Failed: return string mismatch")
 			time.sleep(MIN_INTERVAL/1000.0)
 			return False
+
+	"""
+	Set channel status using Boolean 
+	index: index of channel
+	state: (True, False) for turning on and off
+	"""
+	def setChannelBinary(self, index, state):
+		state=bool(state)
+		val=0;
+		if(state==True):
+			val=BINARY_SETPOINT_ON
+		elif(state==False):
+			val=BINARY_SETPOINT_OFF
+
+		self.SerialDev.testConnection()
+		#index validation
+		if self.checkIndexBound(index)==-1:
+			return False
+		#Serial Status check
+		if self.SerialDev.getStatus()==False:
+			print("Serial not connected")
+			return False
+		#value repeat check
+		if self.channelVal[index]==val:
+			if VERBOSE>1:
+				print("set value is same")
+			return False
+
+		#grab channel ID
+		x=self.channelID[index]
+		#pre-processing for parity
+
+			
+		par=x<<10|val
+		par ^= par >> 8
+		par ^= par >> 4
+		par ^= par >> 2
+		par ^= par >> 1
+		parity=(~par)
+		#processing fo transmission
+		c=[0,0]
+		#two byte of data: channel 5bits, value 10bits, parity 1bit (set on even)
+		c[0]= struct.pack("B",(((x&0x1F)<<3)|((val>>7)&0x7))&0xff)
+		c[1]= struct.pack("B",(val<<1|(parity&0x1))&0xff)
+
+		#initiate communication
+		self.SerialDev.resetBuffer()
+		self.SerialDev.sentByte(b's')
+		#account for frequency limit, repeat untill sent
+		self.SerialDev.sentBytes(c, 2)
+
+		#read return confirmation byte
+		b=0
+		b=self.SerialDev.readByte()
+
+		if b==b'k':	#return String match
+			if VERBOSE>0:
+				print("Channel %d is set to %s"%(x+1, ("on" if state else "off") ))
+			self.channelVal[index]=val
+			self.channelStatus[index]=False
+			time.sleep(MIN_INTERVAL/1000.0)
+			return True
+		else:
+			if VERBOSE>1:
+				print("Set Failed: return string mismatch")
+			time.sleep(MIN_INTERVAL/1000.0)
+			return False
+
 
 		
 	"""

@@ -1,11 +1,11 @@
 v4.0: (board_main_v2.2-2.13)
-	Major restructuring of the code from version 3. Optimization of the 	User interface and communication
+	Major restructuring of the code from version 3. Optimization of the User interface and communication
 v4.1: (board_main_v2.13-3.0)
 	--Critical update
 	Adding ability to save channel parameter. 
 V5.0: (board_main_v3.1)
 	--Critical update
-	Adding ability to connect vacuum to selected channels. Critical 	communication protocol changed. 
+	Adding ability to connect vacuum to selected channels. Critical communication protocol changed. 
 v5.1: (board_main_v3.1)
 	--Non critical update
 	Improve loading of the channel parameters. 
@@ -16,5 +16,11 @@ v5.2: (board_main_v3.1)
 	Add ability to automatically select default serial port
 	Add parameter control for running the program
 v5.3: (board_main_v4)
-	--Non critical update
+	--Non critical update but needed for new function
 	Add Binary Control for all valve channel.
+v5.3: (board_main_v4.1)
+	--Non critical update but needed for new function
+	Bug fix to Binary Control
+
+v5.4: (board_main_v4.1 or board_main_v4.2)
+	--Non critical update, Binary control added to API, No change to UI code.
