@@ -28,6 +28,7 @@ VACUM_OFFSET=80		#amount of negative offset to vacum
 #value for binary control setpoint
 BINARY_SETPOINT_ON=1023
 BINARY_SETPOINT_OFF=1022	
+UPSTREAM_REG_DISABLE_VAL=2047
 
 
 ################################non-critical Parameter########################################
@@ -119,6 +120,8 @@ class App:
 	def __init__(self, masterWindow, serialApp):	
 		###############################Initializer##############################
 		#Intialize Global variabel 
+		self.usRegPressureVal=0; 
+		self.usRegPressureCurrentVal=0; 
 		self.chVal=		[VACUM_OFFSET 	for i in range(N_CHANNEL)]
 		self.valMax=	[VAL_MAX 		for i in range(N_CHANNEL)]
 		self.binStatus=	[False 			for i in range(N_CHANNEL)]
@@ -152,10 +155,10 @@ class App:
 		self.zeroAllBtn.grid(row=1, column=0)
 		"""
 		self.disableAllBtn=tk.Button(self.smFrame, text="disableAll", 
-									activebackground='blue', command=partial(self.toggleUIState, False))
+									activebackground='blue', command=partial(self.toggle_UI_State, False))
 		self.disableAllBtn.grid(row=2, column=0)
 		self.enableAllBtn=tk.Button(self.smFrame, text="enableAll", state='disabled',
-									activebackground='blue', command=partial(self.toggleUIState, True))
+									activebackground='blue', command=partial(self.toggle_UI_State, True))
 		self.enableAllBtn.grid(row=3, column=0)
 		"""
 
@@ -186,7 +189,7 @@ class App:
 
 		#Serial Frame
 		self.serialFrame=tk.Frame(self.masterWindow, bd=1)
-		self.serialFrame.grid(row=3, column=3, columnspan=2)
+		self.serialFrame.grid(row=3, column=2, columnspan=2)
 		#Serial Frame Initialization
 		self.sfLabel=tk.Label(self.serialFrame, text="Serial Port Selection")
 		self.sfLabel.grid(row=0, column=0, columnspan=4)
@@ -209,7 +212,7 @@ class App:
 
 		#Save frame
 		self.saveFrame=tk.Frame(self.masterWindow)
-		self.saveFrame.grid(row=3, column=5, columnspan=2)
+		self.saveFrame.grid(row=3, column=4, columnspan=2)
 		#item initialization
 		self.saveBtn=tk.Button(self.saveFrame, text='Save', command=self.save_Parameter, width=7)
 		self.saveBtn.grid(row=0, column=0)
@@ -221,9 +224,36 @@ class App:
 		self.savePathVar.set(DEFAULT_SAVE_PATH+"Temp.fcbset")
 
 
+
+		#Upstream regulator control frame
+		self.usRegulatorFrame=tk.Frame(self.masterWindow)
+		self.usRegulatorFrame.grid(row=3, column=6, columnspan=2)
+		#items initialization
+		usRegulatorFrameLabel=tk.Label(self.usRegulatorFrame, text='Upstream Pressure Control Panel')
+		usRegulatorFrameLabel.grid(row=0, column=0, columnspan=2)
+		usRegToggleBtnLabel=tk.Label(self.usRegulatorFrame, text='Status: ')
+		usRegToggleBtnLabel.grid(row=1, column=0)
+		self.usRegToggleBtn=tk.Button(self.usRegulatorFrame, text='ON', width=7, fg='green', command=self.us_Clt_Toggle)
+		self.usRegToggleBtn.grid(row=1, column=1)
+		usRegPressureEntryLabel=tk.Label(self.usRegulatorFrame, text='Value: ')
+		usRegPressureEntryLabel.grid(row=2, column=0)
+		self.usRegPressureTxtVar=tk.StringVar(self.usRegulatorFrame)
+		self.usRegPressureEntry=tk.Entry(self.usRegulatorFrame, textvariable=self.usRegPressureTxtVar)
+		self.usRegPressureEntry.grid(row=2, column=1)
+		self.usRegPressureTxtVar.set(0)
+		self.usRegPressureEntry.bind("<Return>", self.us_Reg_Pressure_Entry_Command)
+		self.usRegPressureLabelkpa=tk.Label(self.usRegulatorFrame, text='0')
+		self.usRegPressureLabelkpa.grid(row=3, column=0)
+		usRegPressureLabelkpaLabel=tk.Label(self.usRegulatorFrame, text='kPa')
+		usRegPressureLabelkpaLabel.grid(row=3, column=1)
+		self.usRegPressureLabelpsi=tk.Label(self.usRegulatorFrame, text='0')
+		self.usRegPressureLabelpsi.grid(row=4, column=0)
+		usRegPressureLabelpsiLabel=tk.Label(self.usRegulatorFrame, text='psi')
+		usRegPressureLabelpsiLabel.grid(row=4, column=1)
+
 		#individual Channel Frame
 		self.channelsFrame=tk.Frame(self.masterWindow)
-		self.channelsFrame.grid(row=1, column=0, columnspan=7)
+		self.channelsFrame.grid(row=1, column=0, columnspan=8)
 		#channelsFrame Items Initialization
 		self.chNameEntry	=[0 for i in range(N_CHANNEL)]
 		self.chNameEntryVar	=[0 for i in range(N_CHANNEL)]
@@ -319,33 +349,36 @@ class App:
 			self.statusLabel[i].grid(column=i*2+1, row=7, columnspan=2)	
 
 			#Binary Button
-			self.binaryOnBtn[i]=tk.Button(self.channelsFrame, text="On", command=partial(self.toggleBinState, i))		
+			self.binaryOnBtn[i]=tk.Button(self.channelsFrame, text="On", command=partial(self.toggle_Binary_State, i))		
 			self.binaryOnBtn[i].grid(column=i*2+1, row=8, columnspan=2)	
 
 			#binary on off btn
 			self.binOnBtn[i]=tk.Button(self.channelsFrame, text="On", 
-										command=partial(self.binToggle, i, 1), state="disabled")
+										command=partial(self.binary_Toggle, i, 1), state="disabled")
 			self.binOnBtn[i].grid(column=(i+1)*2, row=9)
 			self.binOffBtn[i]=tk.Button(self.channelsFrame, text="Off", 
-										command=partial(self.binToggle, i, 0), state="disabled")
+										command=partial(self.binary_Toggle, i, 0), state="disabled")
 			self.binOffBtn[i].grid(column=i*2+1, row=9)
 
 
 		#first time Function 
 		self.refresh_Serial() #refresh Serial List
 
-		self.toggleUIState(False)
+		self.toggle_UI_State(False)
 
 
 		print("Program initialization Complete!\n")
 		print("Program begin")
 		self.masterWindow.mainloop()
 
-
 	def timer_Call(self):
 		#this is a routine function call
 		#update Status before set
 		self.request_Channel_Status()
+
+		if(self.usRegPressureVal!=self.usRegPressureCurrentVal):
+			self.set_Upstream()
+
 		#set channel
 		for i in range(N_CHANNEL):
 			if self.chVal[i] != self.slider[i].get() and not self.binState[i]:
@@ -413,6 +446,39 @@ class App:
 		else:
 			self.reset_Serial()
 			print("Serial Not Connected!")
+
+	def set_Upstream(self, force=False):
+		if self.SerialApp.getStatus():
+			valIn=self.usRegPressureVal
+			print("Setting Upstream to : %d"%valIn)
+
+			c=[0,0]
+			#two byte of data: channel 5bits, value 10bits, parity 1bit (set on even)
+			c[0]= struct.pack("B",(valIn>>8))
+			c[1]= struct.pack("B",(valIn&0xff))
+
+			#initiate communication
+			self.SerialApp.resetBuffer()
+			self.SerialApp.sentByte(b'u')
+			#account for frequency limit, repeat until sent
+			self.SerialApp.sentBytes(c, 2)
+
+			b=0
+			b=self.SerialApp.readByte()
+
+			if b==b'k':
+				if VERBOSE>1 :
+					print("Setting Upstream to : %d"%valIn)
+					self.usRegPressureCurrentVal=self.usRegPressureVal;
+			else:	#return string mismatch
+				if VERBOSE>0:
+					print("Return string mismatch")
+
+		else:
+			self.reset_Serial()
+			print("Serial Not Connected!")
+
+
 
 	def request_Channel_Status(self):
 		if self.SerialApp.getStatus():
@@ -524,7 +590,7 @@ class App:
 			self.slider[ind].config(from_=self.slider[ind].get())
 			self.maxEntryVar[ind].set(self.slider[ind].get())	
 
-	def toggleUIState(self, state):
+	def toggle_UI_State(self, state):
 		if (state==False):
 			self.currentState=False
 			print("Disabling all input")
@@ -532,6 +598,8 @@ class App:
 			#self.enableAllBtn.config(state='normal')
 			self.loadBtn.config(state='normal')
 			self.zeroAllBtn.config(state='disabled')
+			self.usRegToggleBtn.config(state='disabled')
+			self.usRegPressureEntry.config(state='disabled')
 			for i in range(N_CHANNEL):
 				self.slider[i].config(state='disabled')
 				self.setMinBtn[i].config(state='disabled')
@@ -550,6 +618,9 @@ class App:
 			#self.enableAllBtn.config(state='disabled')
 			self.loadBtn.config(state='disabled')
 			self.zeroAllBtn.config(state='normal')
+			self.usRegToggleBtn.config(state='normal')
+			self.usRegPressureEntry.config(state='normal')
+			self.usRegPressureTxtVar.set(0)
 			for i in range(N_CHANNEL):
 				self.slider[i].set(0)
 				self.slider[i].config(state='normal')
@@ -570,7 +641,7 @@ class App:
 			self.masterWindow.after(MIN_INTERVAL, self.timer_Call)
 
 	#toggle binary control
-	def toggleBinState(self, ind):
+	def toggle_Binary_State(self, ind):
 		if (not self.binState[ind]):
 			print("set channel %d to Binary Control"%(ind+1))
 			self.binState[ind]=True
@@ -607,14 +678,54 @@ class App:
 			self.set_Channel(ind, True)
 
 	#Toggle Binary State
-	def binToggle(self, ind, state):
+	def binary_Toggle(self, ind, state):
 		if (state):
 			self.binStatus[ind]=True
 		else:
 			self.binStatus[ind]=False
 		self.set_Channel(ind, True)
 
+	def us_Clt_Toggle(self):
+		if (self.usRegToggleBtn['text']=='ON'):
+			self.usRegToggleBtn.config(text='OFF', fg='red')
+			self.usRegPressureEntry.config(state='disabled')
+			self.usRegPressureLabelpsi.config(text='max')
+			self.usRegPressureLabelkpa.config(text='max') 
+			self.usRegPressureVal=UPSTREAM_REG_DISABLE_VAL
+			self.set_Upstream()
+			print("Upstream control set to OFF")
 
+		elif (self.usRegToggleBtn['text']=='OFF'):
+			self.usRegToggleBtn.config(text='ON', fg='green')
+			self.usRegPressureEntry.config(state='normal')
+			self.us_Reg_Pressure_Entry_Command(3)
+			self.set_Upstream()
+			print("Upstream control set to ON")
+
+	def us_Reg_Pressure_Entry_Command(self, dc):
+		print("Changing Up Stream Regulator Setting")
+		try:
+			setVal=int(self.usRegPressureTxtVar.get())
+		except ValueError:
+			print("Value entered is invalid")
+			self.usRegPressureTxtVar.set(int(float(self.usRegPressureLabelpsi['text'])/(100/819.2) ))
+			return
+
+		if(setVal>VAL_MAX):
+			print("Value is over maximum")
+			self.usRegPressureTxtVar.set(int(float(self.usRegPressureLabelpsi['text'])/(100/819.2) ))
+			return
+		elif(setVal<0):
+			print("Value is negative")
+			self.usRegPressureTxtVar.set(int(float(self.usRegPressureLabelpsi['text'])/(100/819.2) ))
+			return
+		else:
+			self.usRegPressureLabelpsi.config(text='%.2f'%(setVal*(100/819.2)) )
+			self.usRegPressureLabelkpa.config(text='%.2f'%(setVal*(100/819.2)*6.89476) ) 
+			self.usRegPressureVal=setVal
+
+
+			
 	def zero_All(self):
 		if VERBOSE>1:
 			print("Zero all Channels")
@@ -645,8 +756,6 @@ class App:
 			elif(VERBOSE>1): print("Default serial option not found")
 
 
-
-
 	def initialize_Serial(self):
 		if self.SerialApp.getStatus()==False:
 			print("Initialize Serial Conenction to %s"%self.serialPort.get())
@@ -656,11 +765,11 @@ class App:
 				self.serialDisconnectBtn.config(state='normal')
 				self.serialConnectBtn.config(state='disabled')
 				self.serialStatusLabel.config(bg='green')
-				self.toggleUIState(True)
+				self.toggle_UI_State(True)
 				self.zero_All()
 			else:
 				self.serialStatusLabel.config(bg='red')
-				self.toggleUIState(False)
+				self.toggle_UI_State(False)
 
 	def reset_Serial(self):
 		if self.SerialApp.getStatus()==True:
@@ -668,7 +777,7 @@ class App:
 			self.serialConnectBtn.config(state='normal')
 			self.serialStatusLabel.config(bg='red')
 			self.SerialApp.reset()
-			self.toggleUIState(False)
+			self.toggle_UI_State(False)
 
 
 	def save_Parameter(self):
